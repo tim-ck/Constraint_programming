@@ -29,18 +29,21 @@ for s in range(num_students):
 # We introduce a penalty variable for each student that is 1 if the centers differ.
 penalty_diff = {}
 for s in range(num_students):
-    penalty_diff[s] = model.NewBoolVar(f'penalty_diff_student_{s}')
-    # Enforce: if assignment differs, penalty is 1.
-    model.Add(assignment[(s, 0)] != assignment[(s, 1)]).OnlyEnforceIf(penalty_diff[s])
-    model.Add(assignment[(s, 0)] == assignment[(s, 1)]).OnlyEnforceIf(penalty_diff[s].Not())
+    for d in range(num_days - 1):
+        penalty_diff[(s, d)] = model.NewBoolVar(f'penalty_diff_student_{s}_between_day_{d}_and_{d+1}')
+        model.Add(assignment[(s, d)] != assignment[(s, d+1)]).OnlyEnforceIf(penalty_diff[(s, d)])
+        model.Add(assignment[(s, d)] == assignment[(s, d+1)]).OnlyEnforceIf(penalty_diff[(s, d)].Not())
 
-# Soft constraint: Prefer that a student gets their preferred center on Day 1.
+# Soft constraint: Prefer that a student gets their preferred center on every day.
 penalty_pref = {}
 for s in range(num_students):
-    penalty_pref[s] = model.NewBoolVar(f'penalty_pref_student_{s}')
-    pref_index = center_to_index[preferred_center[s]]
-    model.Add(assignment[(s, 0)] != pref_index).OnlyEnforceIf(penalty_pref[s])
-    model.Add(assignment[(s, 0)] == pref_index).OnlyEnforceIf(penalty_pref[s].Not())
+    for d in range(num_days):
+        penalty_pref[(s, d)] = model.NewBoolVar(f'penalty_pref_student_{s}_day_{d}')
+        pref_index = center_to_index[preferred_center[s]]
+        model.Add(assignment[(s, d)] != pref_index).OnlyEnforceIf(penalty_pref[(s, d)])
+        model.Add(assignment[(s, d)] == pref_index).OnlyEnforceIf(penalty_pref[(s, d)].Not())
+
+
 
 # Capacity constraints: For each center and day, ensure the number of students assigned doesn't exceed capacity.
 for d in range(num_days):
@@ -56,8 +59,9 @@ for d in range(num_days):
         model.Add(sum(assigned_indicators) <= cap)
 
 # Objective: Minimize the total penalties (for switching centers and not meeting preferences).
-model.Minimize(sum(penalty_diff[s] for s in range(num_students)) +
-               sum(penalty_pref[s] for s in range(num_students)))
+total_diff_penalty = sum(penalty_diff[(s, d)] for s in range(num_students) for d in range(num_days - 1))
+total_pref_penalty = sum(penalty_pref[(s, d)] for s in range(num_students) for d in range(num_days))
+model.Minimize(total_diff_penalty + total_pref_penalty)
 
 # Solve the model.
 solver = cp_model.CpSolver()
@@ -66,12 +70,19 @@ status = solver.Solve(model)
 # Output the results.
 if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
     for s in range(num_students):
-        day0 = solver.Value(assignment[(s, 0)])
-        day1 = solver.Value(assignment[(s, 1)])
-        assigned_center = centers[day0]  # Ideally, both days are the same.
-        print(f"Student {s}: Day 0 = {assigned_center}, Day 1 = {centers[day1]}, "
-              f"Preferred = {preferred_center[s]}, "
-              f"Diff Penalty = {solver.Value(penalty_diff[s])}, "
-              f"Pref Penalty = {solver.Value(penalty_pref[s])}")
+        day_assignments = []
+        diff_penalties = []
+        pref_penalties = []
+        for d in range(num_days):
+            center_assigned = centers[solver.Value(assignment[(s, d)])]
+            day_assignments.append(f"Day {d} = {center_assigned}")
+            pref_penalties.append(f"PrefPenalty Day {d} = {solver.Value(penalty_pref[(s, d)])}")
+            if d < num_days - 1:
+                diff_penalties.append(f"DiffPenalty {d}-{d+1} = {solver.Value(penalty_diff[(s, d)])}")
+    
+        print(f"Student {s}: " + ", ".join(day_assignments) +
+              f", Preferred = {preferred_center[s]}, " +
+              ", ".join(diff_penalties) + ", " +
+              ", ".join(pref_penalties))
 else:
     print("No solution found.")
