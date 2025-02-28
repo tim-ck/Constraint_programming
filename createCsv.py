@@ -7,7 +7,7 @@ preferences = ['A'] * 7500 + ['B'] * 7000 + ['C'] * 7000
 random.shuffle(preferences)  # Shuffle to randomize the order of preferences
 
 # # Filepath
-output_file = 'problem1/students.csv'
+output_file = 'problem2/students.csv'
 
 # Write to CSV
 with open(output_file, mode='w', newline='') as file:
@@ -43,7 +43,7 @@ capacities = {
 }
 
 # Filepath for centers data
-centers_file = 'problem1/centers.csv'
+centers_file = 'problem2/centers.csv'
 
 # Write centers data to CSV
 with open(centers_file, mode='w', newline='') as file:

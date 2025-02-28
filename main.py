@@ -2,8 +2,9 @@ from ortools.sat.python import cp_model
 import csv
 import os
 prefex_path = ['problem1']
-student_csv_path = os.path.join(os.path.dirname(__file__), prefex_path[0], 'students.csv')
-center_csv_path = os.path.join(os.path.dirname(__file__), prefex_path[0], 'centers.csv')
+problem_index = 0
+student_csv_path = os.path.join(os.path.dirname(__file__), prefex_path[problem_index], 'students.csv')
+center_csv_path = os.path.join(os.path.dirname(__file__), prefex_path[problem_index], 'centers.csv')
 
 preferred_center = []
 with open(student_csv_path, newline='') as csvfile:
@@ -20,21 +21,13 @@ num_days = 0
 
 with open(center_csv_path, newline='') as csvfile:
     reader = csv.reader(csvfile)
-    
-    # Collect all centers and their capacities
     center_capacities = []
     for row in reader:
         center_name = row[0]
         centers.append(center_name)
-        
-        # Store capacities for each day
         day_capacities = [int(cap) for cap in row[1:]]
         center_capacities.append((center_name, day_capacities))
-    
-    # Determine number of days from the data
     num_days = len(center_capacities[0][1]) if center_capacities else 0
-    
-    # Create capacity_day dictionaries
     for d in range(num_days):
         day_dict = {}
         for center, caps in center_capacities:
@@ -42,9 +35,7 @@ with open(center_csv_path, newline='') as csvfile:
         capacity_day.append(day_dict)
 
 num_centers = len(centers)
-
 center_to_index = {center: idx for idx, center in enumerate(centers)}
-
 center_counts = {'A': 0, 'B': 0, 'C': 0}
 for pref in preferred_center:
     center_counts[pref] += 1
@@ -52,18 +43,14 @@ print(f"Student preference distribution: {center_counts}")
 for d in range(num_days):
     print(f"Day {num_days}: Center capacities: {capacity_day[d]}")
     print(f"Day {num_days}: Difference: A={capacity_day[d]['A']-center_counts['A']}, B={capacity_day[d]['B']-center_counts['B']}, C={capacity_day[d]['C']-center_counts['C']}")
-
-
-# Create the model.
 model = cp_model.CpModel()
-
-# Decision variables: assignment[(s, d)] is the center (as index) assigned to student s on day d.
+# Decision variables
 assignment = {}
 for s in range(num_students):
     for d in range(num_days):
         assignment[(s, d)] = model.NewIntVar(0, num_centers - 1, f'student_{s}_day_{d}')
 
-# Soft constraint: Prefer that a student stays in the same center across both days.
+# Soft constraint
 penalty_diff = {}
 for s in range(num_students):
     for d in range(num_days - 1):
@@ -71,7 +58,7 @@ for s in range(num_students):
         model.Add(assignment[(s, d)] != assignment[(s, d+1)]).OnlyEnforceIf(penalty_diff[(s, d)])
         model.Add(assignment[(s, d)] == assignment[(s, d+1)]).OnlyEnforceIf(penalty_diff[(s, d)].Not())
 
-# Soft constraint: Prefer that a student gets their preferred center on every day.
+# Soft constraint
 penalty_pref = {}
 for s in range(num_students):
     for d in range(num_days):
@@ -81,37 +68,29 @@ for s in range(num_students):
         model.Add(assignment[(s, d)] == pref_index).OnlyEnforceIf(penalty_pref[(s, d)].Not())
 
 
-# NEW: Move penalty: penalize moves away from the preferred center according to 2*(distance - 1)
-# Example penalty table for 3 centers (A=0, B=1, C=2)
-# penalty_table[pref][assigned] gives the move penalty
+# Soft constraint
 penalty_table = [
     [0, 0, 2],  # preferred = A(0) -> assigned = A(0):0, B(1):0, C(2):2
     [0, 0, 0],  # preferred = B(1) -> assigned = A(0):0, B(1):0, C(2):0
     [2, 0, 0],  # preferred = C(2) -> assigned = A(0):2, B(1):0, C(2):0
 ]
-# Flatten penalty_table into a 1D list.  Suppose penalty_table is 3x3 -> 9 entries.
 flattened_penalty_table = []
 for pref_row in penalty_table:
     flattened_penalty_table.extend(pref_row)
-
-# Then for each student, day:
 penalty_move = {}
 for s in range(num_students):
     for d in range(num_days):
         # Get the preferred center index
         pref_idx = center_to_index[preferred_center[s]]
-        
         # assignment[(s, d)] is the assigned center index
         index_in_table = model.NewIntVar(0, num_centers*num_centers - 1, f'table_index_s{s}_d{d}')
         model.Add(index_in_table == pref_idx * num_centers + assignment[(s, d)])
-        
         penalty_move[(s, d)] = model.NewIntVar(0, max(flattened_penalty_table), f'penalty_move_s{s}_d{d}')
-        
         # AddElement(target_var=penalty_move[(s, d)], index=index_in_table, values=flattened_penalty_table)
         model.AddElement(index_in_table, flattened_penalty_table, penalty_move[(s, d)])
 
 
-# Capacity constraints: For each center and day, ensure the number of students assigned doesn't exceed capacity.
+# Capacity hard constraints: 
 for d in range(num_days):
     for center, cap in capacity_day[d].items():
         center_idx = center_to_index[center]
@@ -127,6 +106,8 @@ for d in range(num_days):
 total_diff_penalty = sum(penalty_diff[(s, d)] for s in range(num_students) for d in range(num_days - 1))
 total_pref_penalty = sum(penalty_pref[(s, d)] for s in range(num_students) for d in range(num_days))
 total_move_penalty = sum(penalty_move[(s, d)] for s in range(num_students) for d in range(num_days))
+# model.Minimize(total_pref_penalty)
+# model.Minimize(2*total_pref_penalty + total_move_penalty)
 model.Minimize(total_diff_penalty + 2*total_pref_penalty + total_move_penalty)
 
 
@@ -138,7 +119,7 @@ status = solver.Solve(model)
 # Output the results.
 if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
     # Create output file path
-    output_path = os.path.join(os.path.dirname(__file__), 'output.csv')
+    output_path = os.path.join(os.path.dirname(__file__), prefex_path[problem_index], 'output.csv')
     with open(output_path, mode='w', newline='') as file:
         writer = csv.writer(file)
         header = ['StudentID', 'PreferredCenter']
