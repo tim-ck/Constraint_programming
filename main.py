@@ -1,8 +1,8 @@
 from ortools.sat.python import cp_model
 import csv
 import os
-prefex_path = ['problem1']
-problem_index = 0
+prefex_path = ['problem1', 'problem2', 'problem3']
+problem_index = 2
 student_csv_path = os.path.join(os.path.dirname(__file__), prefex_path[problem_index], 'students.csv')
 center_csv_path = os.path.join(os.path.dirname(__file__), prefex_path[problem_index], 'centers.csv')
 
@@ -36,13 +36,15 @@ with open(center_csv_path, newline='') as csvfile:
 
 num_centers = len(centers)
 center_to_index = {center: idx for idx, center in enumerate(centers)}
-center_counts = {'A': 0, 'B': 0, 'C': 0}
+center_counts = {center: 0 for center in centers}
 for pref in preferred_center:
     center_counts[pref] += 1
 print(f"Student preference distribution: {center_counts}")
 for d in range(num_days):
     print(f"Day {num_days}: Center capacities: {capacity_day[d]}")
-    print(f"Day {num_days}: Difference: A={capacity_day[d]['A']-center_counts['A']}, B={capacity_day[d]['B']-center_counts['B']}, C={capacity_day[d]['C']-center_counts['C']}")
+    center_diff_string = ', '.join([f"{center}: {capacity_day[d][center]-center_counts[center]}" for center in centers])
+    print(f"Day {num_days}: Difference: {center_diff_string}")
+    # print(f"Day {num_days}: Difference: A={capacity_day[d]['A']-center_counts['A']}, B={capacity_day[d]['B']-center_counts['B']}, C={capacity_day[d]['C']-center_counts['C']}")
 model = cp_model.CpModel()
 # Decision variables
 assignment = {}
@@ -69,26 +71,37 @@ for s in range(num_students):
 
 
 # Soft constraint
-penalty_table = [
-    [0, 0, 2],  # preferred = A(0) -> assigned = A(0):0, B(1):0, C(2):2
-    [0, 0, 0],  # preferred = B(1) -> assigned = A(0):0, B(1):0, C(2):0
-    [2, 0, 0],  # preferred = C(2) -> assigned = A(0):2, B(1):0, C(2):0
-]
+# construct a penalty table such that if it is itself or adjustin, penalty is 0 and anything beyone that would be +2. the formular is 2*(has different between assigned and perfered center index? diff-1 : 0)
+# penalty_table = [
+#     [0, 0, 2],  # preferred = A(0) -> assigned = A(0):0, B(1):0, C(2):2
+#     [0, 0, 0],  # preferred = B(1) -> assigned = A(0):0, B(1):0, C(2):0
+#     [2, 0, 0],  # preferred = C(2) -> assigned = A(0):2, B(1):0, C(2):0
+# ]
+penalty_table = []
+for pref in range(num_centers):
+    row = []
+    for assigned in range(num_centers):
+        if pref == assigned:
+            row.append(0)
+        elif abs(pref - assigned) == 1:
+            row.append(0)
+        else:
+            row.append(2)
+    penalty_table.append(row)
+
 flattened_penalty_table = []
 for pref_row in penalty_table:
     flattened_penalty_table.extend(pref_row)
 penalty_move = {}
 for s in range(num_students):
     for d in range(num_days):
-        # Get the preferred center index
         pref_idx = center_to_index[preferred_center[s]]
-        # assignment[(s, d)] is the assigned center index
         index_in_table = model.NewIntVar(0, num_centers*num_centers - 1, f'table_index_s{s}_d{d}')
         model.Add(index_in_table == pref_idx * num_centers + assignment[(s, d)])
-        penalty_move[(s, d)] = model.NewIntVar(0, max(flattened_penalty_table), f'penalty_move_s{s}_d{d}')
-        # AddElement(target_var=penalty_move[(s, d)], index=index_in_table, values=flattened_penalty_table)
-        model.AddElement(index_in_table, flattened_penalty_table, penalty_move[(s, d)])
-
+        # penalty_move[(s, d)] = model.NewIntVar(0, max(flattened_penalty_table), f'penalty_move_s{s}_d{d}')
+        # model.AddElement(index_in_table, flattened_penalty_table, penalty_move[(s, d)])
+        penalty_move[(s, d)] = model.NewIntVar(0, 2 * max(flattened_penalty_table), f'penalty_move_s{s}_d{d}')
+        model.AddElement(index_in_table, [2 * val for val in flattened_penalty_table], penalty_move[(s, d)])
 
 # Capacity hard constraints: 
 for d in range(num_days):
@@ -112,9 +125,11 @@ model.Minimize(total_diff_penalty + 2*total_pref_penalty + total_move_penalty)
 
 
 # Solve the model.
+print("Solving model...")
 solver = cp_model.CpSolver()
-solver.parameters.max_time_in_seconds = 300
+solver.parameters.max_time_in_seconds = 120
 status = solver.Solve(model)
+print(f"Solver status: {solver.StatusName(status)}")
 
 # Output the results.
 if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):

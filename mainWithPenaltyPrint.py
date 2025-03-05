@@ -36,19 +36,34 @@ with open(center_csv_path, newline='') as csvfile:
 
 num_centers = len(centers)
 center_to_index = {center: idx for idx, center in enumerate(centers)}
-center_counts = {'A': 0, 'B': 0, 'C': 0}
+center_counts = {center: 0 for center in centers}
 for pref in preferred_center:
     center_counts[pref] += 1
 print(f"Student preference distribution: {center_counts}")
 for d in range(num_days):
     print(f"Day {num_days}: Center capacities: {capacity_day[d]}")
-    print(f"Day {num_days}: Difference: A={capacity_day[d]['A']-center_counts['A']}, B={capacity_day[d]['B']-center_counts['B']}, C={capacity_day[d]['C']-center_counts['C']}")
+    center_diff_string = ', '.join([f"{center}: {capacity_day[d][center]-center_counts[center]}" for center in centers])
+    print(f"Day {num_days}: Difference: {center_diff_string}")
+    # print(f"Day {num_days}: Difference: A={capacity_day[d]['A']-center_counts['A']}, B={capacity_day[d]['B']-center_counts['B']}, C={capacity_day[d]['C']-center_counts['C']}")
 model = cp_model.CpModel()
 # Decision variables
 assignment = {}
 for s in range(num_students):
     for d in range(num_days):
         assignment[(s, d)] = model.NewIntVar(0, num_centers - 1, f'student_{s}_day_{d}')
+
+# Capacity hard constraints: 
+for d in range(num_days):
+    for center, cap in capacity_day[d].items():
+        center_idx = center_to_index[center]
+        assigned_indicators = []
+        for s in range(num_students):
+            is_assigned = model.NewBoolVar(f'student_{s}_day_{d}_is_{center}')
+            model.Add(assignment[(s, d)] == center_idx).OnlyEnforceIf(is_assigned)
+            model.Add(assignment[(s, d)] != center_idx).OnlyEnforceIf(is_assigned.Not())
+            assigned_indicators.append(is_assigned)
+        model.Add(sum(assigned_indicators) <= cap)
+
 
 # Soft constraint
 penalty_diff = {}
@@ -69,11 +84,17 @@ for s in range(num_students):
 
 
 # Soft constraint
-penalty_table = [
-    [0, 0, 2],  # preferred = A(0) -> assigned = A(0):0, B(1):0, C(2):2
-    [0, 0, 0],  # preferred = B(1) -> assigned = A(0):0, B(1):0, C(2):0
-    [2, 0, 0],  # preferred = C(2) -> assigned = A(0):2, B(1):0, C(2):0
-]
+penalty_table = []
+for pref in range(num_centers):
+    row = []
+    for assigned in range(num_centers):
+        if pref == assigned:
+            row.append(0)
+        elif abs(pref - assigned) == 1:
+            row.append(0)
+        else:
+            row.append(2)
+    penalty_table.append(row)
 flattened_penalty_table = []
 for pref_row in penalty_table:
     flattened_penalty_table.extend(pref_row)
@@ -88,34 +109,20 @@ for s in range(num_students):
         # penalty_move[(s, d)] = model.NewIntVar(0, 2 * max(flattened_penalty_table), f'penalty_move_s{s}_d{d}')
         # model.AddElement(index_in_table, [2 * val for val in flattened_penalty_table], penalty_move[(s, d)])
 
-
-# Capacity hard constraints: 
-for d in range(num_days):
-    for center, cap in capacity_day[d].items():
-        center_idx = center_to_index[center]
-        # For each student, create an indicator: 1 if student s is assigned to center center_idx on day d.
-        assigned_indicators = []
-        for s in range(num_students):
-            is_assigned = model.NewBoolVar(f'student_{s}_day_{d}_is_{center}')
-            model.Add(assignment[(s, d)] == center_idx).OnlyEnforceIf(is_assigned)
-            model.Add(assignment[(s, d)] != center_idx).OnlyEnforceIf(is_assigned.Not())
-            assigned_indicators.append(is_assigned)
-        model.Add(sum(assigned_indicators) <= cap)
-
-total_diff_penalty = sum(penalty_diff[(s, d)] for s in range(num_students) for d in range(num_days - 1))
 total_pref_penalty = sum(penalty_pref[(s, d)] for s in range(num_students) for d in range(num_days))
+total_diff_penalty = sum(penalty_diff[(s, d)] for s in range(num_students) for d in range(num_days - 1))
 total_move_penalty = sum(penalty_move[(s, d)] for s in range(num_students) for d in range(num_days))
-# model.Minimize(total_pref_penalty)
-# model.Minimize(2*total_pref_penalty + total_move_penalty)
-model.Minimize(total_diff_penalty + 2*total_pref_penalty + total_move_penalty)
+# model.Minimize(total_/pref_penalty)
+# model.Minimize(total_pref_penalty + total_move_penalty)
+model.Minimize(2*total_diff_penalty + total_pref_penalty + total_move_penalty)
 
 
-# Solve the model.
+print("Solving model...")
 solver = cp_model.CpSolver()
-solver.parameters.max_time_in_seconds = 300
+solver.parameters.max_time_in_seconds = 30
 status = solver.Solve(model)
+print(f"Solver status: {solver.StatusName(status)}")
 
-# Output the results.
 if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
     for s in range(num_students):
         print(f"Student {s}:")
@@ -126,7 +133,6 @@ if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             assigned_center = centers[solver.Value(assignment[(s, d)])]
             print(f"  Day {d}: Preferred Center: {preferred_center[s]}, Assigned Center: {assigned_center}, Preference Penalty: {pref_penalty}, Move Penalty: {move_penalty}, Difference Penalty: {diff_penalty}")
 
-    # print total number of students assigned to each center
     print(f"Total students assigned to each center:")
     for d in range(num_days):
         center_counts = {center: 0 for center in centers}
