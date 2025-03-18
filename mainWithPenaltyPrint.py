@@ -124,20 +124,36 @@ status = solver.Solve(model)
 print(f"Solver status: {solver.StatusName(status)}")
 
 if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+    print("\n=== Individual Student Assignments ===")
     for s in range(num_students):
-        print(f"Student {s}:")
+        print(f"\nStudent {s} (Preferred: {preferred_center[s]}):")
         for d in range(num_days):
+            assigned_center = centers[solver.Value(assignment[(s, d)])]
             pref_penalty = solver.Value(penalty_pref[(s, d)])
             move_penalty = solver.Value(penalty_move[(s, d)])
             diff_penalty = solver.Value(penalty_diff[(s, d)]) if (s, d) in penalty_diff else 0
-            assigned_center = centers[solver.Value(assignment[(s, d)])]
-            print(f"  Day {d}: Preferred Center: {preferred_center[s]}, Assigned Center: {assigned_center}, Preference Penalty: {pref_penalty}, Move Penalty: {move_penalty}, Difference Penalty: {diff_penalty}")
+            
+            penalties = []
+            if pref_penalty:
+                penalties.append(f"Preference Penalty: {pref_penalty}")
+            if move_penalty:
+                penalties.append(f"Move Penalty: {move_penalty}")
+            if diff_penalty:
+                penalties.append(f"Day-change Penalty: {diff_penalty}")
+            
+            penalty_str = ", ".join(penalties) if penalties else "No Penalties"
+            
+            print(f"  Day {d + 1}: Assigned Center: {assigned_center} [{penalty_str}]")
 
-    print(f"Total students assigned to each center:")
+    print("\n=== Daily Center Summary ===")
     for d in range(num_days):
+        print(f"\nDay {d + 1}:")
         center_counts = {center: 0 for center in centers}
         for s in range(num_students):
-            center_counts[centers[solver.Value(assignment[(s, d)])]] += 1
-        print(f"Day {d}: {center_counts}")
+            assigned_center = centers[solver.Value(assignment[(s, d)])]
+            center_counts[assigned_center] += 1
+        for center, count in center_counts.items():
+            capacity = capacity_day[d][center]
+            print(f"  Center {center}: {count}/{capacity} students assigned")
 else:
-    print("No solution found. Please try again with different parameters.")
+    print("No solution found. Please adjust constraints or parameters.")
