@@ -107,7 +107,6 @@ for s in range(num_students):
 for d in range(num_days):
     for center, cap in capacity_day[d].items():
         center_idx = center_to_index[center]
-        # For each student, create an indicator: 1 if student s is assigned to center center_idx on day d.
         assigned_indicators = []
         for s in range(num_students):
             is_assigned = model.NewBoolVar(f'student_{s}_day_{d}_is_{center}')
@@ -124,16 +123,13 @@ total_move_penalty = sum(penalty_move[(s, d)] for s in range(num_students) for d
 model.Minimize(total_diff_penalty + 2*total_pref_penalty + total_move_penalty)
 
 
-# Solve the model.
 print("Solving model...")
 solver = cp_model.CpSolver()
 solver.parameters.max_time_in_seconds = 120
 status = solver.Solve(model)
 print(f"Solver status: {solver.StatusName(status)}")
 
-# Output the results.
 if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-    # Create output file path
     output_path = os.path.join(os.path.dirname(__file__), prefex_path[problem_index], 'output.csv')
     with open(output_path, mode='w', newline='') as file:
         writer = csv.writer(file)
@@ -148,7 +144,6 @@ if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             for d in range(num_days):
                 penalty_sum = solver.Value(penalty_pref[(s, d)]) + solver.Value(penalty_move[(s, d)])
                 
-                # Only add diff penalty if more than one day
                 diff_penalty = 0
                 if num_days > 1 and (s, d) in penalty_diff:
                     diff_penalty = solver.Value(penalty_diff[(s, d)])
@@ -160,7 +155,6 @@ if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 row_values.append(p)
             writer.writerow(row_values)
 
-    # print total number of students assigned to each center
     print(f"Total students assigned to each center:")
     for d in range(num_days):
         center_counts = {center: 0 for center in centers}
